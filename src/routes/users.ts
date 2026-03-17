@@ -1,95 +1,127 @@
 import { Router, Request, Response } from "express";
-import { readCollection, writeCollection, getNextId } from "../lib/storage.js";
 import bcrypt from "bcryptjs";
-
-type User = {
-  id: number;
-  nama: string;
-  username: string;
-  password: string;
-  role: string;
-  komisariat: string | null;
-  aktif: boolean;
-  createdAt: string;
-  updatedAt: string;
-};
+import prisma from "../lib/prisma.js";
 
 const router = Router();
 
-router.get("/", (_req: Request, res: Response) => {
-  const users = readCollection<User>("users");
-  const admins = users
-    .filter((u) => u.role === "admin")
-    .map(({ password: _, ...rest }) => rest);
-  res.json(admins);
+// GET all admin users (superadmin only — auth enforced in index.ts)
+router.get("/", async (_req: Request, res: Response) => {
+  const users = await prisma.user.findMany({
+    where: { role: "admin" },
+    select: {
+      id: true,
+      nama: true,
+      username: true,
+      role: true,
+      komisariat: true,
+      aktif: true,
+      createdAt: true,
+      updatedAt: true,
+    },
+    orderBy: { createdAt: "desc" },
+  });
+  res.json(users);
 });
 
+// POST create admin
 router.post("/", async (req: Request, res: Response) => {
   const body = req.body;
-  const users = readCollection<User>("users");
 
-  if (users.find((u) => u.username === body.username)) {
-    res.status(400).json({ error: "Username sudah terdaftar" });
+  if (!body.username || !body.nama) {
+    res.status(400).json({ error: "Username dan nama wajib diisi" });
     return;
   }
 
-  const hashedPassword = await bcrypt.hash(body.password || "admin123", 10);
+  const username = String(body.username).trim();
+  if (!/^[a-zA-Z0-9_]{3,50}$/.test(username)) {
+    res.status(400).json({ error: "Username hanya boleh huruf, angka, underscore (3-50 karakter)" });
+    return;
+  }
 
-  const newUser: User = {
-    id: getNextId("users"),
-    nama: body.nama,
-    username: body.username,
-    password: hashedPassword,
-    role: "admin",
-    komisariat: body.komisariat || null,
-    aktif: true,
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-  };
+  if (!body.password || body.password.length < 6) {
+    res.status(400).json({ error: "Password wajib diisi minimal 6 karakter" });
+    return;
+  }
 
-  users.push(newUser);
-  writeCollection("users", users);
+  const existing = await prisma.user.findUnique({
+    where: { username },
+  });
+  if (existing) {
+    res.status(409).json({ error: "Username sudah terdaftar" });
+    return;
+  }
 
-  const { password: _, ...userWithoutPassword } = newUser;
-  res.status(201).json(userWithoutPassword);
+  const hashedPassword = await bcrypt.hash(body.password, 10);
+
+  const newUser = await prisma.user.create({
+    data: {
+      nama: String(body.nama).trim().slice(0, 200),
+      username,
+      password: hashedPassword,
+      role: "admin",
+      komisariat: body.komisariat || null,
+    },
+    select: {
+      id: true,
+      nama: true,
+      username: true,
+      role: true,
+      komisariat: true,
+      aktif: true,
+      createdAt: true,
+      updatedAt: true,
+    },
+  });
+
+  res.status(201).json(newUser);
 });
 
+// PUT update admin
 router.put("/:id", async (req: Request, res: Response) => {
-  const { id } = req.params;
+  const id = Number(req.params.id);
+  if (isNaN(id)) { res.status(400).json({ error: "ID tidak valid" }); return; }
   const body = req.body;
-  const users = readCollection<User>("users");
-  const index = users.findIndex((u) => u.id === Number(id));
 
-  if (index === -1) {
+  const existing = await prisma.user.findUnique({ where: { id } });
+  if (!existing) {
     res.status(404).json({ error: "Tidak ditemukan" });
     return;
   }
 
-  if (body.password) {
-    body.password = await bcrypt.hash(body.password, 10);
-  } else {
-    delete body.password;
+  // Whitelist allowed fields
+  const updateData: Record<string, unknown> = {};
+  if (body.nama !== undefined) updateData.nama = body.nama;
+  if (body.komisariat !== undefined) updateData.komisariat = body.komisariat;
+  if (body.aktif !== undefined) updateData.aktif = body.aktif;
+
+  if (body.password && body.password.length >= 6) {
+    updateData.password = await bcrypt.hash(body.password, 10);
   }
 
-  users[index] = {
-    ...users[index],
-    ...body,
-    id: users[index].id,
-    role: users[index].role,
-    updatedAt: new Date().toISOString(),
-  };
+  const updated = await prisma.user.update({
+    where: { id },
+    data: updateData,
+    select: {
+      id: true,
+      nama: true,
+      username: true,
+      role: true,
+      komisariat: true,
+      aktif: true,
+      createdAt: true,
+      updatedAt: true,
+    },
+  });
 
-  writeCollection("users", users);
-
-  const { password: _, ...userWithoutPassword } = users[index];
-  res.json(userWithoutPassword);
+  res.json(updated);
 });
 
-router.delete("/:id", (req: Request, res: Response) => {
-  const { id } = req.params;
-  const users = readCollection<User>("users");
-  const user = users.find((u) => u.id === Number(id));
+// DELETE admin
+router.delete("/:id", async (req: Request, res: Response) => {
+  const id = Number(req.params.id);
+  if (isNaN(id)) { res.status(400).json({ error: "ID tidak valid" }); return; }
 
+  const user = await prisma.user.findUnique({ where: { id } });
   if (!user) {
     res.status(404).json({ error: "Tidak ditemukan" });
     return;
@@ -100,8 +132,7 @@ router.delete("/:id", (req: Request, res: Response) => {
     return;
   }
 
-  const filtered = users.filter((u) => u.id !== Number(id));
-  writeCollection("users", filtered);
+  await prisma.user.delete({ where: { id } });
   res.json({ success: true });
 });
 

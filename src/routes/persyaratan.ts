@@ -1,94 +1,106 @@
 import { Router, Request, Response } from "express";
-import { readCollection, writeCollection, getNextId } from "../lib/storage.js";
-import { authMiddleware } from "../middleware/auth.js";
-
-type Persyaratan = {
-  id: number;
-  kegiatanId: number;
-  nama: string;
-  jenis: string;
-  wajib: boolean;
-  urutan: number;
-  aktif: boolean;
-  createdAt: string;
-  updatedAt: string;
-};
+import prisma from "../lib/prisma.js";
+import { authMiddleware, roleMiddleware } from "../middleware/auth.js";
 
 const router = Router();
 
-router.get("/", (req: Request, res: Response) => {
-  const items = readCollection<Persyaratan>("persyaratan");
+// GET all persyaratan (public, filtered by kegiatanId)
+router.get("/", async (req: Request, res: Response) => {
   const { kegiatanId } = req.query;
 
-  let filtered = items.filter((i) => i.aktif);
-
+  const where: Record<string, unknown> = { aktif: true };
   if (kegiatanId) {
-    filtered = filtered.filter((i) => i.kegiatanId === Number(kegiatanId));
+    where.kegiatanId = Number(kegiatanId);
   }
 
-  const sorted = filtered.sort((a, b) => a.urutan - b.urutan);
-  res.json(sorted);
+  const items = await prisma.persyaratan.findMany({
+    where,
+    orderBy: { urutan: "asc" },
+  });
+
+  res.json(items);
 });
 
-router.post("/", authMiddleware, (req: Request, res: Response) => {
+// POST create (admin/superadmin)
+router.post("/", authMiddleware, roleMiddleware("admin", "superadmin"), async (req: Request, res: Response) => {
   const body = req.body;
-  const items = readCollection<Persyaratan>("persyaratan");
 
   if (!body.kegiatanId) {
     res.status(400).json({ error: "kegiatanId wajib diisi" });
     return;
   }
 
-  const newItem: Persyaratan = {
-    id: getNextId("persyaratan"),
-    kegiatanId: Number(body.kegiatanId),
-    nama: body.nama,
-    jenis: body.jenis || "file",
-    wajib: body.wajib ?? true,
-    urutan: body.urutan ?? items.length + 1,
-    aktif: true,
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-  };
+  if (!body.nama || !String(body.nama).trim()) {
+    res.status(400).json({ error: "Nama persyaratan wajib diisi" });
+    return;
+  }
 
-  items.push(newItem);
-  writeCollection("persyaratan", items);
+  const allowedJenis = ["file", "teks", "checkbox", "paragraf", "pilihan_ganda"];
+  const jenis = body.jenis || "file";
+  if (!allowedJenis.includes(jenis)) {
+    res.status(400).json({ error: `Jenis harus salah satu dari: ${allowedJenis.join(", ")}` });
+    return;
+  }
+
+  const count = await prisma.persyaratan.count({
+    where: { kegiatanId: Number(body.kegiatanId) },
+  });
+
+  const newItem = await prisma.persyaratan.create({
+    data: {
+      kegiatanId: Number(body.kegiatanId),
+      nama: String(body.nama).trim().slice(0, 200),
+      jenis,
+      wajib: body.wajib ?? true,
+      opsi: body.opsi || undefined,
+      urutan: body.urutan ?? count + 1,
+    },
+  });
+
   res.status(201).json(newItem);
 });
 
-router.put("/:id", authMiddleware, (req: Request, res: Response) => {
-  const { id } = req.params;
+// PUT update (admin/superadmin)
+router.put("/:id", authMiddleware, roleMiddleware("admin", "superadmin"), async (req: Request, res: Response) => {
+  const id = Number(req.params.id);
+  if (isNaN(id)) { res.status(400).json({ error: "ID tidak valid" }); return; }
   const body = req.body;
-  const items = readCollection<Persyaratan>("persyaratan");
-  const index = items.findIndex((i) => i.id === Number(id));
 
-  if (index === -1) {
+  const existing = await prisma.persyaratan.findUnique({ where: { id } });
+  if (!existing) {
     res.status(404).json({ error: "Tidak ditemukan" });
     return;
   }
 
-  items[index] = {
-    ...items[index],
-    ...body,
-    id: items[index].id,
-    updatedAt: new Date().toISOString(),
-  };
+  // Whitelist allowed fields
+  const updateData: Record<string, unknown> = {};
+  const allowedFields = ["nama", "jenis", "wajib", "opsi", "urutan", "aktif"];
+  for (const field of allowedFields) {
+    if (body[field] !== undefined) {
+      updateData[field] = body[field];
+    }
+  }
 
-  writeCollection("persyaratan", items);
-  res.json(items[index]);
+  const updated = await prisma.persyaratan.update({
+    where: { id },
+    data: updateData,
+  });
+
+  res.json(updated);
 });
 
-router.delete("/:id", authMiddleware, (req: Request, res: Response) => {
-  const { id } = req.params;
-  const items = readCollection<Persyaratan>("persyaratan");
-  const filtered = items.filter((i) => i.id !== Number(id));
+// DELETE (admin/superadmin)
+router.delete("/:id", authMiddleware, roleMiddleware("admin", "superadmin"), async (req: Request, res: Response) => {
+  const id = Number(req.params.id);
+  if (isNaN(id)) { res.status(400).json({ error: "ID tidak valid" }); return; }
 
-  if (filtered.length === items.length) {
+  const existing = await prisma.persyaratan.findUnique({ where: { id } });
+  if (!existing) {
     res.status(404).json({ error: "Tidak ditemukan" });
     return;
   }
 
-  writeCollection("persyaratan", filtered);
+  await prisma.persyaratan.delete({ where: { id } });
   res.json({ success: true });
 });
 

@@ -1,18 +1,8 @@
 import { Router, Request, Response } from "express";
-import { readCollection } from "../lib/storage.js";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
+import prisma from "../lib/prisma.js";
 import { JWT_SECRET } from "../middleware/auth.js";
-
-type User = {
-  id: number;
-  nama: string;
-  username: string;
-  password: string;
-  role: string;
-  komisariat: string | null;
-  aktif: boolean;
-};
 
 const router = Router();
 
@@ -24,8 +14,8 @@ router.post("/login", async (req: Request, res: Response) => {
     return;
   }
 
-  const users = readCollection<User>("users");
-  const user = users.find((u) => u.username === username);
+  const trimmedUsername = String(username).trim().slice(0, 100);
+  const user = await prisma.user.findUnique({ where: { username: trimmedUsername } });
 
   if (!user) {
     res.status(401).json({ error: "Username atau password salah" });

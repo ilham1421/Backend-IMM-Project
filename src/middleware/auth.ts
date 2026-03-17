@@ -1,7 +1,13 @@
 import { Request, Response, NextFunction } from "express";
 import jwt from "jsonwebtoken";
 
-export const JWT_SECRET = process.env.JWT_SECRET || "imm-secret-key-2026";
+const JWT_SECRET_VALUE = process.env.JWT_SECRET;
+if (!JWT_SECRET_VALUE) {
+  console.error("❌ FATAL: JWT_SECRET environment variable is not set!");
+  process.exit(1);
+}
+
+export const JWT_SECRET: string = JWT_SECRET_VALUE;
 
 export interface AuthPayload {
   id: number;
@@ -27,7 +33,7 @@ export function authMiddleware(req: Request, res: Response, next: NextFunction) 
 
   const token = authHeader.split(" ")[1];
   try {
-    const decoded = jwt.verify(token, JWT_SECRET) as AuthPayload;
+    const decoded = jwt.verify(token, JWT_SECRET) as unknown as AuthPayload;
     req.user = decoded;
     next();
   } catch {

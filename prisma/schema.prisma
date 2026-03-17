@@ -1,0 +1,152 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id         Int      @id @default(autoincrement())
+  nama       String
+  username   String   @unique
+  password   String
+  role       String   @default("admin")
+  komisariat String?
+  aktif      Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@map("users")
+}
+
+model Komisariat {
+  id        Int      @id @default(autoincrement())
+  nama      String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  kegiatan KegiatanKomisariat[]
+
+  @@map("komisariat")
+}
+
+model Kegiatan {
+  id               Int      @id @default(autoincrement())
+  namaKegiatan     String
+  singkatan        String
+  deskripsi        String   @default("")
+  tanggalMulai     String   @default("")
+  tanggalSelesai   String   @default("")
+  lokasi           String   @default("")
+  kuotaPeserta     Int      @default(100)
+  batasRegistrasi  String   @default("")
+  statusBuka       Boolean  @default(false)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  komisariat   KegiatanKomisariat[]
+  persyaratan  Persyaratan[]
+  peserta      Peserta[]
+
+  @@map("kegiatan")
+}
+
+model KegiatanKomisariat {
+  id           Int        @id @default(autoincrement())
+  kegiatanId   Int
+  komisariatId Int
+
+  kegiatan   Kegiatan   @relation(fields: [kegiatanId], references: [id], onDelete: Cascade)
+  komisariat Komisariat @relation(fields: [komisariatId], references: [id], onDelete: Cascade)
+
+  @@unique([kegiatanId, komisariatId])
+  @@map("kegiatan_komisariat")
+}
+
+model Persyaratan {
+  id         Int      @id @default(autoincrement())
+  kegiatanId Int
+  nama       String
+  jenis      String   @default("file")
+  wajib      Boolean  @default(true)
+  opsi       Json?
+  urutan     Int      @default(1)
+  aktif      Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  kegiatan Kegiatan @relation(fields: [kegiatanId], references: [id], onDelete: Cascade)
+
+  @@index([kegiatanId])
+  @@map("persyaratan")
+}
+
+model Peserta {
+  id             Int      @id @default(autoincrement())
+  noPendaftaran  String   @unique
+  kegiatanId     Int
+  namaLengkap    String
+  nim            String
+  tempatLahir    String
+  tanggalLahir   String
+  jenisKelamin   String
+  email          String
+  noHp           String
+  universitas    String
+  fakultas       String
+  prodi          String
+  komisariat     String
+  alamat         String
+  status         String   @default("Menunggu")
+  berkas         Json     @default("[]")
+  jawaban        Json     @default("[]")
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  kegiatan   Kegiatan    @relation(fields: [kegiatanId], references: [id], onDelete: Cascade)
+  statusLogs StatusLog[]
+
+  @@index([kegiatanId, nim])
+  @@index([kegiatanId, email])
+  @@index([noPendaftaran])
+  @@index([status])
+  @@index([komisariat])
+  @@index([createdAt])
+  @@map("peserta")
+}
+
+model StatusLog {
+  id             Int      @id @default(autoincrement())
+  pesertaId      Int
+  noPendaftaran  String
+  statusLama     String
+  statusBaru     String
+  diubahOleh     String
+  role           String
+  waktu          DateTime @default(now())
+  emailTerkirim  Boolean  @default(false)
+
+  peserta Peserta @relation(fields: [pesertaId], references: [id], onDelete: Cascade)
+
+  @@index([pesertaId])
+  @@map("status_logs")
+}
+
+model Pengaturan {
+  id              Int      @id @default(1)
+  namaKegiatan    String   @default("")
+  singkatan       String   @default("")
+  deskripsi       String   @default("")
+  tanggalMulai    String   @default("")
+  tanggalSelesai  String   @default("")
+  lokasi          String   @default("")
+  kuotaPeserta    Int      @default(100)
+  batasRegistrasi String   @default("")
+  statusBuka      Boolean  @default(false)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@map("pengaturan")
+}
